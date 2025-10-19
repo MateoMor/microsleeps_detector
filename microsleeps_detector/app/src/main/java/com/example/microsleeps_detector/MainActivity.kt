@@ -10,11 +10,23 @@ import androidx.navigation.ui.setupActionBarWithNavController
 import android.view.Menu
 import android.view.MenuItem
 import com.example.microsleeps_detector.databinding.ActivityMainBinding
+import com.google.mediapipe.tasks.vision.core.RunningMode
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), FaceLandmarkerHelper.LandmarkerListener {
 
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
+
+    // Exponer el helper para que lo use el fragmento de cámara
+    lateinit var faceHelper: FaceLandmarkerHelper
+        private set
+
+    // Listener delegado hacia el fragmento activo (p.ej., CameraFragment)
+    private var landmarkerDelegate: FaceLandmarkerHelper.LandmarkerListener? = null
+
+    fun setLandmarkerListener(listener: FaceLandmarkerHelper.LandmarkerListener?) {
+        landmarkerDelegate = listener
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +39,14 @@ class MainActivity : AppCompatActivity() {
         val navController = findNavController(R.id.nav_host_fragment_content_main)
         appBarConfiguration = AppBarConfiguration(navController.graph)
         setupActionBarWithNavController(navController, appBarConfiguration)
+
+        // Inicializar FaceLandmarkerHelper en modo LIVE_STREAM
+        faceHelper = FaceLandmarkerHelper(
+            // Valores por defecto, puedes ajustarlos luego si quieres
+            runningMode = RunningMode.LIVE_STREAM,
+            context = this,
+            faceLandmarkerHelperListener = this
+        )
 
         binding.fab.setOnClickListener { view ->
             Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
@@ -56,4 +76,30 @@ class MainActivity : AppCompatActivity() {
         return navController.navigateUp(appBarConfiguration)
                 || super.onSupportNavigateUp()
     }
+
+    // Implementación del listener: reenviar a quien esté suscrito desde el fragmento
+    override fun onError(error: String, errorCode: Int) {
+        landmarkerDelegate?.onError(error, errorCode)
+    }
+
+    override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {
+        landmarkerDelegate?.onResults(resultBundle)
+    }
+
+    override fun onEmpty() {
+        landmarkerDelegate?.onEmpty()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!this::faceHelper.isInitialized) return
+        // Liberar recursos del helper
+        faceHelper.clearFaceLandmarker()
+    }
+
+    fun isFaceHelperReady(): Boolean =
+        this::faceHelper.isInitialized && !faceHelper.isClose()
+
+    fun faceHelperOrNull(): FaceLandmarkerHelper? =
+        if (isFaceHelperReady()) faceHelper else null
 }

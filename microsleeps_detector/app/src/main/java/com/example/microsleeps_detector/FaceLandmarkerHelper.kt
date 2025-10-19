@@ -334,7 +334,7 @@ class FaceLandmarkerHelper(
         result: FaceLandmarkerResult,
         input: MPImage
     ) {
-        if( result.faceLandmarks().size > 0 ) {
+        if(result.faceLandmarks().isNotEmpty()) {
             val finishTimeMs = SystemClock.uptimeMillis()
             val inferenceTime = finishTimeMs - result.timestampMs()
 

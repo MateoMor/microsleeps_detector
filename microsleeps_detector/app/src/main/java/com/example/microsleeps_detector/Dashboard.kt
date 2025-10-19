@@ -33,7 +33,8 @@ class Dashboard : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         binding.buttonFirst.setOnClickListener {
-            findNavController().navigate(R.id.Dashboard)
+            findNavController().navigate(R.id.action_dashboard_to_camera)
+            /*findNavController().navigate(R.id.action_Dashboard_to_BlankFragment)*/
         }
     }
 

@@ -17,4 +17,52 @@
         android:layout_height="match_parent"
         android:clickable="false" />
 
+    <!-- Top-left labels -->
+    <LinearLayout
+        android:id="@+id/labelContainerTopLeft"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:background="#66000000"
+        android:clickable="false"
+        android:focusable="false"
+        android:elevation="8dp">
+
+        <TextView
+            android:id="@+id/labelPrimary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EAR: 0.00"
+            android:textColor="@android:color/white"
+            android:textStyle="bold"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/labelSecondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Nods: 0"
+            android:textColor="@android:color/white"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- Bottom-center label -->
+    <TextView
+        android:id="@+id/labelBottom"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:background="#66000000"
+        android:text="Detecting..."
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        android:clickable="false"
+        android:focusable="false"
+        android:elevation="8dp" />
+
 </FrameLayout>

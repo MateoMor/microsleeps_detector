@@ -90,6 +90,11 @@ class MainActivity : AppCompatActivity(), FaceLandmarkerHelper.LandmarkerListene
         landmarkerDelegate?.onEmpty()
     }
 
+    // Reenviar análisis intermedios si el delegado lo soporta
+    override fun onAnalysis(result: FaceAnalysis.Result) {
+        landmarkerDelegate?.onAnalysis(result)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (!this::faceHelper.isInitialized) return

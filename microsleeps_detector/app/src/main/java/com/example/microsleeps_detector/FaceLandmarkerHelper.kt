@@ -49,6 +49,9 @@ class FaceLandmarkerHelper(
     // If the Face Landmarker will not change, a lazy val would be preferable.
     private var faceLandmarker: FaceLandmarker? = null
 
+    // Analyzer module
+    private val faceAnalysis = FaceAnalysis()
+
     init {
         setupFaceLandmarker()
     }
@@ -338,6 +341,15 @@ class FaceLandmarkerHelper(
             val finishTimeMs = SystemClock.uptimeMillis()
             val inferenceTime = finishTimeMs - result.timestampMs()
 
+            // First face landmarks -> normalized (x,y) pairs
+            val pts: List<Pair<Float, Float>> =
+                result.faceLandmarks()[0].map { lm -> lm.x() to lm.y() }
+
+            // Feed FaceAnalysis with the same timestamp
+            faceAnalysis.update(pts, result.timestampMs())?.let { analysisRes ->
+                faceLandmarkerHelperListener?.onAnalysis(analysisRes)
+            }
+
             faceLandmarkerHelperListener?.onResults(
                 ResultBundle(
                     result,
@@ -391,7 +403,9 @@ class FaceLandmarkerHelper(
     interface LandmarkerListener {
         fun onError(error: String, errorCode: Int = OTHER_ERROR)
         fun onResults(resultBundle: ResultBundle)
-
+        fun onAnalysis(result: FaceAnalysis.Result) {}
         fun onEmpty() {}
     }
+
+
 }

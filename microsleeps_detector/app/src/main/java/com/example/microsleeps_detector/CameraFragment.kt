@@ -15,6 +15,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.microsleeps_detector.databinding.FragmentCameraBinding
+import com.example.microsleeps_detector.ui.LabelsRenderer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -25,6 +26,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     private var cameraExecutor: ExecutorService? = null
     private var isFrontCamera = true
+    private var renderer: LabelsRenderer? = null
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -41,6 +43,7 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        renderer = LabelsRenderer(binding)
         ensurePermissionAndStart()
     }
 
@@ -53,7 +56,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     }
 
     private fun startCamera() {
-        val activity = requireActivity() as MainActivity
         val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
@@ -70,10 +72,10 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
             analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
                 val helper = (requireActivity() as MainActivity).faceHelperOrNull()
                 if (helper == null) {
-                    imageProxy.close() // avoid stalling the pipeline
+                    imageProxy.close()
                     return@setAnalyzer
                 }
-                helper.detectLiveStream(imageProxy, isFrontCamera) // helper closes the image internally
+                helper.detectLiveStream(imageProxy, isFrontCamera)
             }
 
             val selector = CameraSelector.Builder()
@@ -91,7 +93,6 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onResume() {
         super.onResume()
-        // Suscribir este fragment como listener para recibir resultados del helper
         (requireActivity() as MainActivity).setLandmarkerListener(this)
     }
 
@@ -102,32 +103,39 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        renderer = null
         _binding = null
         cameraExecutor?.shutdown()
         cameraExecutor = null
     }
 
     // FaceLandmarkerHelper.LandmarkerListener
-    override fun onError(error: String, errorCode: Int) {
-        // Mostrar un mensaje simple; podrías mejorar con Snackbar
-        if (!isAdded) return
-        requireActivity().runOnUiThread {
-            Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
-        }
+
+    override fun onAnalysis(result: FaceAnalysis.Result) {
+        // Forward analysis to the labels renderer (handles main thread internally)
+        renderer?.render(result)
     }
 
     override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {
         if (!isAdded) return
         requireActivity().runOnUiThread {
-            // Entregar al overlay en el hilo principal para dibujar
             binding.overlay.setResults(resultBundle)
         }
     }
 
     override fun onEmpty() {
         if (!isAdded) return
+        renderer?.setStatus("No face detected")
         requireActivity().runOnUiThread {
             binding.overlay.clear()
+        }
+    }
+
+    override fun onError(error: String, errorCode: Int) {
+        if (!isAdded) return
+        renderer?.setStatus("Error: $error")
+        requireActivity().runOnUiThread {
+            Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
         }
     }
 }

@@ -2,15 +2,37 @@ package com.example.microsleeps_detector
 
 import kotlin.math.hypot
 
+/**
+ * Computes per-frame face analysis metrics from MediaPipe Face Mesh landmarks.
+ *
+ * Metrics:
+ * - EAR (Eye Aspect Ratio): left, right, and smoothed average; eyesClosed boolean based on threshold.
+ * - Head nod detection: state machine using a normalized pitch proxy; maintains a running count.
+ */
 class FaceAnalysis(
-    private val earClosedThreshold: Float = 0.21f,
-    private val earSmoothingAlpha: Float = 0.3f,
-    private val nodAmpThreshold: Float = 0.12f,
-    private val nodReleaseThreshold: Float = 0.05f,
-    private val nodMaxDurationMs: Long = 1200L,
-    private val nodBaselineAlpha: Float = 0.03f,
-    private val nodMeasureAlpha: Float = 0.3f
+    private val earClosedThreshold: Float = 0.10f,      // Eyes are considered closed when smoothed EAR < this value.
+    private val earSmoothingAlpha: Float = 0.3f,       // EMA alpha for EAR smoothing \[0..1]; higher = faster, noisier.
+
+    private val nodAmpThreshold: Float = 0.09f,       // Delta threshold to trigger a nod (start) in the selected polarity.
+    private val nodReleaseThreshold: Float = 0.05f,      // Delta threshold to release/end the nod (hysteresis).
+
+    private val nodMaxDurationMs: Long = 1000L,         // Max time between trigger and release to count a nod.
+
+    private val nodBaselineAlpha: Float = 0.03f ,       // EMA alpha for the slow baseline of pitch (long‑term pose).
+    private val nodMeasureAlpha: Float = 0.3f,        // EMA alpha for the fast measure of pitch (short‑term motion).
+    // Polarity: DOWN (default) triggers when nose goes down relative to eyes; UP for inverse.
+    private val nodPolarity: NodPolarity = NodPolarity.DOWN
 ) {
+    /**
+     * Output of a single analysis step.
+     * @property earLeft raw EAR for left eye
+     * @property earRight raw EAR for right eye
+     * @property earAverage smoothed average EAR used for eyesClosed
+     * @property eyesClosed true if \[earAverage] < threshold
+     * @property isNodEvent true if a nod completes on this frame
+     * @property totalNods running nod counter
+     * @property pitchProxy smoothed normalized vertical displacement of nose vs eyes
+     */
     data class Result(
         val earLeft: Float,
         val earRight: Float,
@@ -21,6 +43,8 @@ class FaceAnalysis(
         val pitchProxy: Float
     )
 
+    enum class NodPolarity { DOWN, UP }
+
     private enum class NodState { Idle, Down }
     private var earAvgEma: Float? = null
     private var nodState: NodState = NodState.Idle
@@ -29,7 +53,12 @@ class FaceAnalysis(
     private var nodMeasure: Float? = null
     private var nodCount: Int = 0
 
-    // Call for each frame. points must contain Face Mesh indices up to 387.
+    /**
+     * Processes landmarks for a frame and updates EAR and nod metrics.
+     * @param points normalized \[0,1] list of (x,y) landmarks for the first face. Must include indices up to 387.
+     * @param timestampMs frame timestamp in milliseconds (monotonic preferred).
+     * @return \[Result] if indices are present; null if not enough landmarks.
+     */
     fun update(points: List<Pair<Float, Float>>, timestampMs: Long): Result? {
         if (points.size <= 387) return null
 
@@ -47,19 +76,28 @@ class FaceAnalysis(
         nodMeasure = ema(pitch, nodMeasure, nodMeasureAlpha)
         val base = nodBaseline ?: pitch
         val meas = nodMeasure ?: pitch
+        val delta = meas - base
+
+        // Polarity-dependent triggers
+        val triggerDown = delta > nodAmpThreshold
+        val releaseDown = delta < nodReleaseThreshold
+        val triggerUp = delta < -nodAmpThreshold
+        val releaseUp = delta > -nodReleaseThreshold
+
+        val trigger = if (nodPolarity == NodPolarity.DOWN) triggerDown else triggerUp
+        val release = if (nodPolarity == NodPolarity.DOWN) releaseDown else releaseUp
 
         var isEvent = false
         when (nodState) {
             NodState.Idle -> {
-                if (meas - base > nodAmpThreshold) {
+                if (trigger) {
                     nodState = NodState.Down
                     nodDownStartTs = timestampMs
                 }
             }
             NodState.Down -> {
                 val tooLong = (timestampMs - nodDownStartTs) > nodMaxDurationMs
-                val released = (meas - base) < nodReleaseThreshold
-                if (released && !tooLong) {
+                if (release && !tooLong) {
                     nodCount += 1
                     isEvent = true
                     nodState = NodState.Idle
@@ -80,6 +118,9 @@ class FaceAnalysis(
         )
     }
 
+    /**
+     * Computes Eye Aspect Ratio (EAR) for one eye using common Face Mesh indices.
+     */
     private fun ear(p: List<Pair<Float, Float>>, left: Boolean): Float {
         val p1 = if (left) 33 else 263
         val p4 = if (left) 133 else 362
@@ -92,6 +133,10 @@ class FaceAnalysis(
         return if (den > 0f) num / den else 0f
     }
 
+    /**
+     * Pitch proxy normalized by inter-ocular distance: positive when nose goes down relative to eyes.
+     * MediaPipe normalized Y increases downward.
+     */
     private fun pitchProxy(p: List<Pair<Float, Float>>): Float {
         val leftEyeCorner = p[33]
         val rightEyeCorner = p[263]

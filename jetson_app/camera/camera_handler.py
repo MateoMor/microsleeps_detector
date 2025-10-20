@@ -5,6 +5,8 @@ from datetime import datetime
 import time
 
 from .face_parser import FaceParser
+from analysis.perclos_calculator import PERCLOSAnalyzer
+
 
 class CameraHandler:
     def __init__ (self):
@@ -47,6 +49,7 @@ class CameraHandler:
         show_fps = True
 
         face_parser = FaceParser()
+        perclos_analyzer = PERCLOSAnalyzer(window_seconds=30, ear_threshold=0.21)
 
 
         while cap.isOpened():
@@ -65,9 +68,25 @@ class CameraHandler:
             rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
 
-            process_frame = face_parser.process_frame(rgb_frame, height, width)
+            process_frame, ear = face_parser.process_frame(rgb_frame, height, width)
 
             self.calculate_fps()
+
+            if ear is not None:
+                perclos_analyzer.add_ear_measurement(ear)
+                perclos_analyzer.calculate_perclos()
+                estado = perclos_analyzer.get_state()
+
+            # Mostrar el PERCLOS en pantalla
+                texto_estado = f"{estado['state']} ({estado['perclos_percentage']:.1f}%)"
+                color = (0, 255, 0)
+                if estado["is_warning"]:
+                    color = (0, 255, 255)
+                if estado["is_danger"]:
+                    color = (0, 0, 255)
+    
+                cv2.putText(process_frame, texto_estado, (30, 160),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
 
             # Show FPS

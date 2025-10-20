@@ -30,6 +30,7 @@ class FaceParser:
         self.panel = Panel2D()
         
     def eye_aspect_ratio(self, landmarks, indices, w, h, img=None, color=(0,255,0)):
+        ear = None
         pts = [(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in indices]
         p0, p1, p2, p3, p4, p5 = np.array(pts)
 
@@ -163,7 +164,7 @@ class FaceParser:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
                 # Detectar posible cabeceo (cabeza bajando)
-                if pitch > 30:  # ajusta este umbral según tus pruebas
+                if pitch > -30:  # ajusta este umbral según tus pruebas
                     cv2.putText(frame, "Cabeceo detectado!", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,255), 3)
                 
                 # Crear panel 2D con valores de EAR
@@ -173,7 +174,7 @@ class FaceParser:
         if panel_2d is not None:
             cv2.imshow('Panel 2D - Vista Ojos', panel_2d)
             
-        return frame
+        return frame, ear
                 
                 
                 

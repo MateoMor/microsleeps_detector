@@ -62,4 +62,7 @@ dependencies {
 
     // MediaPipe Tasks Vision (Face Landmarker)
     implementation("com.google.mediapipe:tasks-vision:0.10.18")
+
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

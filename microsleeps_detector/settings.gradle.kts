@@ -21,6 +21,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "microsleeps_detector"
 include(":app")
-
-
- 

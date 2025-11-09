@@ -34,7 +34,10 @@ class Dashboard : Fragment() {
 
         binding.buttonFirst.setOnClickListener {
             findNavController().navigate(R.id.action_dashboard_to_camera)
-            /*findNavController().navigate(R.id.action_Dashboard_to_BlankFragment)*/
+        }
+
+        binding.buttonStream.setOnClickListener {
+            findNavController().navigate(R.id.action_dashboard_to_stream)
         }
     }
 

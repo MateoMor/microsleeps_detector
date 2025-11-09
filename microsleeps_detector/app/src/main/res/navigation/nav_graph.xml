@@ -13,6 +13,9 @@
         <action
             android:id="@+id/action_dashboard_to_camera"
             app:destination="@id/CameraFragment" />
+        <action
+            android:id="@+id/action_dashboard_to_stream"
+            app:destination="@id/StreamFragment" />
     </fragment>
 
     <fragment
@@ -20,5 +23,11 @@
         android:name="com.example.microsleeps_detector.CameraFragment"
         android:label="Cámara"
         tools:layout="@layout/fragment_camera" />
+
+    <fragment
+        android:id="@+id/StreamFragment"
+        android:name="com.example.microsleeps_detector.StreamFragment"
+        android:label="@string/Stream"
+        tools:layout="@layout/fragment_stream" />
 
 </navigation>

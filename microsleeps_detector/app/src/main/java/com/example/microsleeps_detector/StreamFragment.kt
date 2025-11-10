@@ -13,10 +13,8 @@ import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
-import java.io.InputStream
 import android.util.Log
-import kotlin.code
-
+import java.util.concurrent.TimeUnit
 
 private val TAG = "StreamFragment"
 
@@ -25,8 +23,11 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     private var _binding: FragmentStreamBinding? = null
     private val binding get() = _binding!!
 
-    private val streamUrl = "http://192.168.43.74/stream" // Reemplaza con tu URL
-    private val client = OkHttpClient()
+    private val streamUrl = "http://192.168.43.74/stream"
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
     private var streamJob: Job? = null
     private var renderer: LabelsRenderer? = null
 
@@ -42,7 +43,7 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         renderer = LabelsRenderer(binding)
-        Log.e(TAG, "Hello")
+        Log.e(TAG, "Starting StreamFragment")
         startStream()
     }
 
@@ -50,20 +51,14 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         Log.e(TAG, "Starting stream")
         streamJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.e(TAG, "Trying to connect to stream")
-
+                Log.e(TAG, "Trying to connect to stream: $streamUrl")
                 val request = Request.Builder().url(streamUrl).build()
-
-                Log.e(TAG, "Request built with request: $request")
-
                 val response = client.newCall(request).execute()
 
-                Log.d(TAG, "Response=${response}, message=${response.message}")
-
+                Log.d(TAG, "Response code=${response.code}")
 
                 if (!response.isSuccessful) {
-                    Log.e(TAG, "Response not successful")
-
+                    Log.e(TAG, "Response not successful: ${response.code}")
                     withContext(Dispatchers.Main) {
                         renderer?.setStatus("Error: ${response.code}")
                     }
@@ -72,12 +67,19 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
                 val inputStream = response.body?.byteStream()
                 if (inputStream != null) {
+                    Log.d(TAG, "Connected, starting MJPEG parser")
                     withContext(Dispatchers.Main) {
                         renderer?.setStatus("Connected to stream")
                     }
-                    parseMjpegStream(inputStream, this)
+                    parseMjpegStream(inputStream)
+                } else {
+                    Log.e(TAG, "Response body is null")
+                    withContext(Dispatchers.Main) {
+                        renderer?.setStatus("Empty response body")
+                    }
                 }
-            } catch (e: IOException) {
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception in startStream: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     renderer?.setStatus("Error: ${e.message}")
                 }
@@ -85,40 +87,46 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         }
     }
 
-    private suspend fun parseMjpegStream(inputStream: InputStream, scope: CoroutineScope) {
+    private suspend fun parseMjpegStream(inputStream: java.io.InputStream) {
         try {
             val buffer = ByteArray(1024 * 64)
             var bytesRead: Int
             val frameBuffer = mutableListOf<Byte>()
-            val boundary = "--frame"
             var contentLength = 0
-            var currentHeaderLength = 0
             var isReadingHeader = true
             var isReadingJpeg = false
 
-            while (true) {
-                scope.ensureActive()
+            while (streamJob?.isActive == true) {
                 bytesRead = withContext(Dispatchers.IO) {
                     inputStream.read(buffer)
                 }
-                if (bytesRead <= 0) break
+
+                if (bytesRead <= 0) {
+                    Log.d(TAG, "Stream ended")
+                    break
+                }
 
                 for (i in 0 until bytesRead) {
                     val byte = buffer[i]
                     frameBuffer.add(byte)
 
-                    // Si estamos leyendo headers, busca Content-Length
                     if (isReadingHeader) {
-                        currentHeaderLength++
-                        val frameStr = String(frameBuffer.toByteArray(), Charsets.UTF_8)
+                        // Convert buffer to string to search for Content-Length
+                        if (frameBuffer.size > 50) {
+                            val frameStr = try {
+                                String(frameBuffer.toByteArray(), Charsets.UTF_8)
+                            } catch (e: Exception) {
+                                ""
+                            }
 
-                        // Busca el patrón Content-Length: [número]
-                        val contentLengthMatch = Regex("Content-Length: (\\d+)").find(frameStr)
-                        if (contentLengthMatch != null) {
-                            contentLength = contentLengthMatch.groupValues[1].toInt()
+                            val contentLengthMatch = Regex("Content-Length: (\\d+)").find(frameStr)
+                            if (contentLengthMatch != null) {
+                                contentLength = contentLengthMatch.groupValues[1].toInt()
+                                Log.d(TAG, "Found Content-Length: $contentLength")
+                            }
                         }
 
-                        // Detecta fin de headers (doble CRLF: \r\n\r\n)
+                        // Detect end of headers (double CRLF: \r\n\r\n = 0x0D 0x0A 0x0D 0x0A)
                         if (frameBuffer.size >= 4 &&
                             frameBuffer[frameBuffer.size - 4].toInt() and 0xFF == 0x0D &&
                             frameBuffer[frameBuffer.size - 3].toInt() and 0xFF == 0x0A &&
@@ -128,23 +136,26 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                             isReadingHeader = false
                             isReadingJpeg = true
                             frameBuffer.clear()
+                            Log.d(TAG, "Headers done, expecting $contentLength bytes of JPEG")
                         }
-                    } else if (isReadingJpeg) {
-                        // Leyendo el JPEG
+                    } else if (isReadingJpeg && contentLength > 0) {
+                        // We have enough bytes for a complete JPEG
                         if (frameBuffer.size >= contentLength) {
-                            // Ya tenemos el JPEG completo
+                            Log.d(TAG, "Got complete JPEG frame ($contentLength bytes)")
                             val jpegData = frameBuffer.take(contentLength).toByteArray()
                             val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
 
                             if (bitmap != null) {
+                                Log.d(TAG, "Frame decoded (${bitmap.width}x${bitmap.height})")
                                 withContext(Dispatchers.Main) {
                                     if (isAdded) {
                                         binding.streamImageView.setImageBitmap(bitmap)
                                     }
                                 }
+                            } else {
+                                Log.w(TAG, "Failed to decode bitmap")
                             }
 
-                            // Limpiar buffer y prepararse para el siguiente frame
                             frameBuffer.clear()
                             isReadingHeader = true
                             isReadingJpeg = false
@@ -154,6 +165,7 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                 }
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Stream parser error: ${e.message}", e)
             withContext(Dispatchers.Main) {
                 if (isAdded) {
                     renderer?.setStatus("Stream error: ${e.message}")
@@ -183,7 +195,6 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     // FaceLandmarkerHelper.LandmarkerListener
 
     override fun onAnalysis(result: FaceAnalysis.Result) {
-        // Forward analysis to the labels renderer (handles main thread internally)
         renderer?.render(result)
     }
 

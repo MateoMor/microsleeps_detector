@@ -64,5 +64,7 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.18")
 
 
+    // MJPEG View Library
+    implementation("com.github.niqdev:ipcam-view:2.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

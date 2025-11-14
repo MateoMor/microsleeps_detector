@@ -23,6 +23,9 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     private var _binding: FragmentStreamBinding? = null
     private val binding get() = _binding!!
 
+    // For visualization adjustments
+    private val imageRotation = 90f
+
     private val streamUrl = "http://192.168.43.74/stream"
     //private val streamUrl = "http://10.253.50.3/stream"
     //private val streamUrl = "http://192.168.4.1/stream"
@@ -89,6 +92,46 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         }
     }
 
+    private suspend fun processFrameForFaceDetection(bitmap: android.graphics.Bitmap) {
+        withContext(Dispatchers.IO) {
+            try {
+                val helper = (requireActivity() as MainActivity).faceHelperOrNull()
+                if (helper == null) {
+                    Log.w(TAG, "FaceLandmarkerHelper not available")
+                    return@withContext
+                }
+
+                // Convertir Bitmap a MPImage
+                val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
+
+                // Detectar con timestamp actual
+                val timestamp = android.os.SystemClock.uptimeMillis()
+                helper.detectAsync(mpImage, timestamp)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing frame for face detection: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Rota un Bitmap por los grados especificados.
+     * @param source Bitmap original
+     * @param degrees Grados de rotación (0, 90, 180, 270)
+     * @return Bitmap rotado
+     */
+    private fun rotateBitmap(source: android.graphics.Bitmap, degrees: Float): android.graphics.Bitmap {
+        if (degrees == 0f) return source
+
+        val matrix = android.graphics.Matrix().apply {
+            postRotate(degrees)
+        }
+
+        return android.graphics.Bitmap.createBitmap(
+            source, 0, 0, source.width, source.height, matrix, true
+        )
+    }
+
     private suspend fun parseMjpegStream(inputStream: java.io.InputStream) {
         try {
             val buffer = ByteArray(1024 * 64)
@@ -149,9 +192,14 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
                             if (bitmap != null) {
                                 Log.d(TAG, "Frame decoded (${bitmap.width}x${bitmap.height})")
+
+                                val rotatedBitmap = rotateBitmap(bitmap, imageRotation)
+
+                                processFrameForFaceDetection(rotatedBitmap)
+
                                 withContext(Dispatchers.Main) {
                                     if (isAdded) {
-                                        binding.streamImageView.setImageBitmap(bitmap)
+                                        binding.streamImageView.setImageBitmap(rotatedBitmap)
                                     }
                                 }
                             } else {

@@ -24,6 +24,8 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     private val binding get() = _binding!!
 
     private val streamUrl = "http://192.168.43.74/stream"
+    //private val streamUrl = "http://10.253.50.3/stream"
+    //private val streamUrl = "http://192.168.4.1/stream"
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)

@@ -19,6 +19,10 @@ abstract class BaseFaceDetectionFragment<B : ViewBinding> : Fragment(), FaceLand
     protected var _binding: B? = null
     protected abstract val binding: B
 
+    // Allow subclasses to disable activity landmarker listener and local alarm
+    protected open val useActivityLandmarkerListener: Boolean = true
+    protected open val playLocalAlarm: Boolean = true
+
     protected var alarmPlayer: AlarmPlayer? = null
     protected var renderer: LabelsRenderer? = null
 
@@ -47,12 +51,16 @@ abstract class BaseFaceDetectionFragment<B : ViewBinding> : Fragment(), FaceLand
 
     override fun onResume() {
         super.onResume()
-        (requireActivity() as MainActivity).setLandmarkerListener(this)
+        if (useActivityLandmarkerListener) {
+            (requireActivity() as MainActivity).setLandmarkerListener(this)
+        }
     }
 
     override fun onPause() {
         super.onPause()
-        (requireActivity() as MainActivity).setLandmarkerListener(null)
+        if (useActivityLandmarkerListener) {
+            (requireActivity() as MainActivity).setLandmarkerListener(null)
+        }
         onPauseImpl()
     }
 
@@ -89,10 +97,12 @@ abstract class BaseFaceDetectionFragment<B : ViewBinding> : Fragment(), FaceLand
         renderer?.render(result)
 
         // Activar/desactivar alarma según ojos cerrados
-        if (result.eyesClosed) {
-            alarmPlayer?.play()
-        } else {
-            alarmPlayer?.stop()
+        if (playLocalAlarm) {
+            if (result.eyesClosed) {
+                alarmPlayer?.play()
+            } else {
+                alarmPlayer?.stop()
+            }
         }
     }
 

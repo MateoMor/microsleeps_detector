@@ -101,6 +101,12 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
     private var currentResponseBody: okhttp3.ResponseBody? = null
     private var isStoppingStream = false
 
+    // Nuevos listeners para resultados y eventos
+    private val resultListeners = mutableListOf<(FaceLandmarkerHelper.ResultBundle) -> Unit>()
+    private val analysisListeners = mutableListOf<(FaceAnalysis.Result) -> Unit>()
+    private val emptyListeners = mutableListOf<() -> Unit>()
+    private val errorListeners = mutableListOf<(String, Int) -> Unit>()
+
     inner class LocalBinder : Binder() {
         fun getService(): DrowsinessDetectionService = this@DrowsinessDetectionService
     }
@@ -508,6 +514,38 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         frameListeners.remove(listener)
     }
 
+    fun addResultListener(listener: (FaceLandmarkerHelper.ResultBundle) -> Unit) {
+        resultListeners.add(listener)
+    }
+
+    fun removeResultListener(listener: (FaceLandmarkerHelper.ResultBundle) -> Unit) {
+        resultListeners.remove(listener)
+    }
+
+    fun addAnalysisListener(listener: (FaceAnalysis.Result) -> Unit) {
+        analysisListeners.add(listener)
+    }
+
+    fun removeAnalysisListener(listener: (FaceAnalysis.Result) -> Unit) {
+        analysisListeners.remove(listener)
+    }
+
+    fun addEmptyListener(listener: () -> Unit) {
+        emptyListeners.add(listener)
+    }
+
+    fun removeEmptyListener(listener: () -> Unit) {
+        emptyListeners.remove(listener)
+    }
+
+    fun addErrorListener(listener: (String, Int) -> Unit) {
+        errorListeners.add(listener)
+    }
+
+    fun removeErrorListener(listener: (String, Int) -> Unit) {
+        errorListeners.remove(listener)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
@@ -544,6 +582,10 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
             }
             alarmPlayer?.stop()
         }
+        // Notificar a listeners de análisis
+        analysisListeners.forEach { l ->
+            try { l(result) } catch (_: Exception) {}
+        }
     }
 
     override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {
@@ -551,6 +593,10 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
             if (currentState != STATE_RUNNING && currentState != STATE_EYES_CLOSED) {
                 updateNotification(STATE_RUNNING)
             }
+        }
+        // Notificar a listeners de resultados
+        resultListeners.forEach { l ->
+            try { l(resultBundle) } catch (_: Exception) {}
         }
     }
 
@@ -565,10 +611,18 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
             }
         }
         alarmPlayer?.stop()
+        // Notificar a listeners de vacío
+        emptyListeners.forEach { l ->
+            try { l() } catch (_: Exception) {}
+        }
     }
 
     override fun onError(error: String, errorCode: Int) {
         Log.e(TAG, "Detection error: $error")
         updateNotification("$STATE_ERROR: $error")
+        // Notificar a listeners de error
+        errorListeners.forEach { l ->
+            try { l(error, errorCode) } catch (_: Exception) {}
+        }
     }
 }

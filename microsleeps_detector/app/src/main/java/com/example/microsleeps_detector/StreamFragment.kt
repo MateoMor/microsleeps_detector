@@ -1,36 +1,108 @@
 package com.example.microsleeps_detector
 
-import android.graphics.BitmapFactory
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.graphics.Bitmap
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
+import android.os.IBinder
+import android.view.*
 import com.example.microsleeps_detector.databinding.FragmentStreamBinding
 import com.example.microsleeps_detector.ui.OverlayView
-import kotlinx.coroutines.*
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import android.util.Log
-import java.util.concurrent.TimeUnit
-
-private val TAG = "StreamFragment"
 
 class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
     override val binding get() = _binding!!
 
-    // For visualization adjustments
-    private val imageRotation = 90f
+    // Usaremos la misma instancia del servicio que el Dashboard
+    private var serviceBound = false
+    private var service: DrowsinessDetectionService? = null
 
-    private val streamUrl = "http://192.168.43.74/stream"
-    //private val streamUrl = "http://10.253.50.3/stream"
-    //private val streamUrl = "http://192.168.4.1/stream"
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-    private var streamJob: Job? = null
-    private var isConnected = false
+    // Listeners para suscribir/desuscribir limpiamente
+    private var stateListener: ((String) -> Unit)? = null
+    private var frameListener: ((Bitmap) -> Unit)? = null
+    private var resultListener: ((FaceLandmarkerHelper.ResultBundle) -> Unit)? = null
+    private var analysisListener: ((FaceAnalysis.Result) -> Unit)? = null
+    private var emptyListener: (() -> Unit)? = null
+    private var errorListener: ((String, Int) -> Unit)? = null
+
+    // Evitar usar el listener del Activity y evitar alarma local (el servicio ya maneja alarma)
+    override val useActivityLandmarkerListener: Boolean = false
+    override val playLocalAlarm: Boolean = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val local = binder as? DrowsinessDetectionService.LocalBinder
+            service = local?.getService()
+            serviceBound = service != null
+            if (!serviceBound) return
+
+            // Estado del servicio -> etiqueta inferior y estado visual
+            stateListener = { state ->
+                renderer?.setStatus(state)
+                if (state == DrowsinessDetectionService.STATE_NOT_CONNECTED || state.startsWith("Se desconectó")) {
+                    if (isAdded) {
+                        requireActivity().runOnUiThread {
+                            binding.streamImageView.setImageDrawable(null)
+                            getOverlayView()?.clear()
+                        }
+                    }
+                }
+            }
+            stateListener?.let { service?.addStateListener(it) }
+
+            // Frame de vista previa -> mostrar en ImageView
+            frameListener = { bmp ->
+                // Post to ImageView to ensure main thread without needing early return labels
+                binding.streamImageView.post {
+                    if (isAdded) {
+                        binding.streamImageView.setImageBitmap(bmp)
+                    }
+                }
+            }
+            frameListener?.let { service?.addFrameListener(it) }
+
+            // Resultados y análisis -> overlay y labels
+            resultListener = { bundle ->
+                if (isAdded) {
+                    requireActivity().runOnUiThread {
+                        getOverlayView()?.setResults(bundle)
+                    }
+                }
+            }
+            resultListener?.let { service?.addResultListener(it) }
+
+            analysisListener = { result ->
+                renderer?.render(result)
+            }
+            analysisListener?.let { service?.addAnalysisListener(it) }
+
+            emptyListener = {
+                if (isAdded) {
+                    renderer?.setStatus("No face detected")
+                    requireActivity().runOnUiThread { getOverlayView()?.clear() }
+                }
+            }
+            emptyListener?.let { service?.addEmptyListener(it) }
+
+            errorListener = { error, _ ->
+                renderer?.setStatus("Error: $error")
+            }
+            errorListener?.let { service?.addErrorListener(it) }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            unsubscribeAll()
+            service = null
+            serviceBound = false
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setHasOptionsMenu(true)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -42,199 +114,65 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
     }
 
     override fun onViewCreatedImpl(view: View, savedInstanceState: Bundle?) {
-        // Mostrar estado inicial explícito
-        renderer?.setStatus("No conectado")
-        Log.e(TAG, "Starting StreamFragment")
-        startStream()
+        // Mostrar estado inicial
+        renderer?.setStatus(DrowsinessDetectionService.STATE_NOT_CONNECTED)
+        // Vincular al servicio (si ya está corriendo lo reutiliza; si no, solo mostrará estado)
+        bindToService()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
+        inflater.inflate(R.menu.menu_stream, menu)
+        super.onCreateOptionsMenu(menu, inflater)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_stop_service -> {
+                val intent = Intent(requireContext(), DrowsinessDetectionService::class.java).apply {
+                    action = DrowsinessDetectionService.ACTION_STOP
+                }
+                requireContext().startService(intent)
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
     }
 
     override fun getOverlayView(): OverlayView? = binding.overlay
 
     override fun onPauseImpl() {
-        streamJob?.cancel()
-        isConnected = false
-        renderer?.setStatus("No conectado")
+        // No detener el servicio aquí: compartido entre fragments
     }
 
     override fun onDestroyViewImpl() {
-        streamJob?.cancel()
+        unbindFromService()
     }
 
-    private fun startStream() {
-        Log.e(TAG, "Starting stream")
-        streamJob = CoroutineScope(Dispatchers.IO).launch {
-            try {
-                Log.e(TAG, "Trying to connect to stream: $streamUrl")
-                val request = Request.Builder().url(streamUrl).build()
-                val response = client.newCall(request).execute()
+    private fun bindToService() {
+        val intent = Intent(requireContext(), DrowsinessDetectionService::class.java)
+        requireContext().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
 
-                Log.d(TAG, "Response code=${response.code}")
-
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "Response not successful: ${response.code}")
-                    isConnected = false
-                    withContext(Dispatchers.Main) {
-                        renderer?.setStatus("No conectado")
-                    }
-                    return@launch
-                }
-
-                val inputStream = response.body?.byteStream()
-                if (inputStream != null) {
-                    // Conectado
-                    isConnected = true
-                    Log.d(TAG, "Connected, starting MJPEG parser")
-                    withContext(Dispatchers.Main) {
-                        renderer?.setStatus("Conectado")
-                    }
-                    parseMjpegStream(inputStream)
-                } else {
-                    // No conectado (sin datos)
-                    isConnected = false
-                    Log.e(TAG, "Response body is null")
-                    withContext(Dispatchers.Main) {
-                        renderer?.setStatus("No conectado")
-                    }
-                }
-            } catch (e: Exception) {
-                // Error durante conexión inicial
-                isConnected = false
-                Log.e(TAG, "Exception in startStream: ${e.message}", e)
-                withContext(Dispatchers.Main) {
-                    renderer?.setStatus("No conectado")
-                }
-            }
+    private fun unbindFromService() {
+        if (serviceBound) {
+            unsubscribeAll()
+            requireContext().unbindService(serviceConnection)
+            serviceBound = false
         }
     }
 
-    private suspend fun processFrameForFaceDetection(bitmap: android.graphics.Bitmap) {
-        withContext(Dispatchers.IO) {
-            try {
-                val helper = (requireActivity() as MainActivity).faceHelperOrNull()
-                if (helper == null) {
-                    Log.w(TAG, "FaceLandmarkerHelper not available")
-                    return@withContext
-                }
-
-                // Convertir Bitmap a MPImage (sin rotación)
-                val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
-
-                // Detectar con timestamp actual
-                val timestamp = android.os.SystemClock.uptimeMillis()
-                helper.detectAsync(mpImage, timestamp)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing frame for face detection: ${e.message}", e)
-            }
-        }
-    }
-
-    /**
-     * Rota un Bitmap por los grados especificados solo para visualización.
-     */
-    private fun rotateBitmap(source: android.graphics.Bitmap, degrees: Float): android.graphics.Bitmap {
-        if (degrees == 0f) return source
-        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
-        return android.graphics.Bitmap.createBitmap(
-            source, 0, 0, source.width, source.height, matrix, true
-        )
-    }
-
-    private suspend fun parseMjpegStream(inputStream: java.io.InputStream) {
-        try {
-            val buffer = ByteArray(1024 * 64)
-            var bytesRead: Int
-            val frameBuffer = mutableListOf<Byte>()
-            var contentLength = 0
-            var isReadingHeader = true
-            var isReadingJpeg = false
-
-            while (streamJob?.isActive == true) {
-                bytesRead = withContext(Dispatchers.IO) { inputStream.read(buffer) }
-                if (bytesRead <= 0) {
-                    Log.d(TAG, "Stream ended")
-                    // Se desconectó
-                    isConnected = false
-                    withContext(Dispatchers.Main) { renderer?.setStatus("Se desconectó") }
-                    break
-                }
-
-                for (i in 0 until bytesRead) {
-                    val byte = buffer[i]
-                    frameBuffer.add(byte)
-
-                    if (isReadingHeader) {
-                        if (frameBuffer.size > 50) {
-                            val frameStr = try {
-                                String(frameBuffer.toByteArray(), Charsets.UTF_8)
-                            } catch (_: Exception) { "" }
-
-                            val contentLengthMatch = Regex("Content-Length: (\\d+)").find(frameStr)
-                            if (contentLengthMatch != null) {
-                                contentLength = contentLengthMatch.groupValues[1].toInt()
-                            }
-                        }
-
-                        if (frameBuffer.size >= 4 &&
-                            frameBuffer[frameBuffer.size - 4].toInt() and 0xFF == 0x0D &&
-                            frameBuffer[frameBuffer.size - 3].toInt() and 0xFF == 0x0A &&
-                            frameBuffer[frameBuffer.size - 2].toInt() and 0xFF == 0x0D &&
-                            frameBuffer[frameBuffer.size - 1].toInt() and 0xFF == 0x0A
-                        ) {
-                            isReadingHeader = false
-                            isReadingJpeg = true
-                            frameBuffer.clear()
-                        }
-                    } else if (isReadingJpeg && contentLength > 0) {
-                        if (frameBuffer.size >= contentLength) {
-                            val jpegData = frameBuffer.take(contentLength).toByteArray()
-                            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-
-                            if (bitmap != null) {
-                                // 1) Detectar con bitmap original
-                                processFrameForFaceDetection(bitmap)
-                                // 2) Rotar SOLO para mostrar
-                                val displayBitmap = rotateBitmap(bitmap, imageRotation)
-                                withContext(Dispatchers.Main) {
-                                    if (isAdded) {
-                                        binding.streamImageView.setImageBitmap(displayBitmap)
-                                    }
-                                }
-                                // No reciclar el bitmap asignado al ImageView
-                            } else {
-                                Log.w(TAG, "Failed to decode bitmap")
-                            }
-
-                            frameBuffer.clear()
-                            isReadingHeader = true
-                            isReadingJpeg = false
-                            contentLength = 0
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Stream parser error: ${e.message}", e)
-            // Se desconectó por error
-            isConnected = false
-            withContext(Dispatchers.Main) {
-                if (isAdded) {
-                    renderer?.setStatus("Se desconectó")
-                }
-            }
-        }
-    }
-
-    // Override to avoid 'No face detected' when not connected
-    override fun onEmpty() {
-        if (!isAdded) return
-        if (!isConnected) {
-            renderer?.setStatus("No conectado")
-            requireActivity().runOnUiThread { binding.overlay.clear() }
-            return
-        }
-        // Connected but no face detected
-        renderer?.setStatus("No face detected")
-        requireActivity().runOnUiThread { binding.overlay.clear() }
+    private fun unsubscribeAll() {
+        stateListener?.let { service?.removeStateListener(it) }
+        frameListener?.let { service?.removeFrameListener(it) }
+        resultListener?.let { service?.removeResultListener(it) }
+        analysisListener?.let { service?.removeAnalysisListener(it) }
+        emptyListener?.let { service?.removeEmptyListener(it) }
+        errorListener?.let { service?.removeErrorListener(it) }
+        stateListener = null
+        frameListener = null
+        resultListener = null
+        analysisListener = null
+        emptyListener = null
+        errorListener = null
     }
 }

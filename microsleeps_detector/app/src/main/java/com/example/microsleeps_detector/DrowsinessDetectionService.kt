@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import android.graphics.Bitmap
 
 /**
  * Servicio en segundo plano que mantiene la conexión con ESP32-CAM
@@ -44,15 +45,20 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         const val STATE_DISCONNECTED = "Se desconectó"
         const val STATE_DISCONNECTED_TIMEOUT = "Se desconectó (timeout)"
         const val STATE_ERROR = "Error"
+        const val STATE_SENDING_CLOSE = "Cerrando conexión" // nuevo estado opcional
 
-        // Timeout para detectar desconexión (6 segundos sin frames)
-        private const val FRAME_TIMEOUT_MS = 6000L
+        // Timeout para detectar desconexión (3 segundos sin frames)
+        private const val FRAME_TIMEOUT_MS = 3000L
         // Intervalo de chequeo del watchdog
         private const val WATCHDOG_INTERVAL_MS = 1000L
         // Reintentos de reconexión
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private const val RECONNECT_DELAY_MS = 5000L
         const val EXTRA_FRAME_TIMEOUT_MS = "EXTRA_FRAME_TIMEOUT_MS"
+
+        private const val PREVIEW_MIN_INTERVAL_MS = 300L
+        private const val PREVIEW_MAX_WIDTH = 480
+        private const val PREVIEW_MAX_HEIGHT = 360
     }
 
     private val binder = LocalBinder()
@@ -87,6 +93,13 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
 
     // Callbacks para actualizar UI
     private val stateListeners = mutableListOf<(String) -> Unit>()
+    private val frameListeners = mutableListOf<(Bitmap) -> Unit>()
+    private val lastPreviewTime = AtomicLong(0L)
+
+    // Nueva variable para seguimiento de conexión HTTP actual
+    private var currentCall: okhttp3.Call? = null
+    private var currentResponseBody: okhttp3.ResponseBody? = null
+    private var isStoppingStream = false
 
     inner class LocalBinder : Binder() {
         fun getService(): DrowsinessDetectionService = this@DrowsinessDetectionService
@@ -127,6 +140,10 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
                 startWatchdog()
             }
             ACTION_STOP -> {
+                // Enviar señal de cierre antes de parar si había conexión
+                if (wasEverConnected || isConnected) {
+                    sendDisconnectSignal()
+                }
                 shouldReconnect = false
                 stopStreamDetection()
                 stopWatchdog()
@@ -259,9 +276,16 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
 
         streamJob = serviceScope.launch {
             try {
+                isStoppingStream = false
                 Log.d(TAG, "Connecting to stream: $streamUrl")
-                val request = Request.Builder().url(streamUrl).build()
-                val response = client.newCall(request).execute()
+                val request = Request.Builder()
+                    .url(streamUrl)
+                    .header("Connection", "close")
+                    .build()
+                val call = client.newCall(request)
+                currentCall = call
+                val response = call.execute()
+                currentResponseBody = response.body
 
                 if (!response.isSuccessful) {
                     Log.e(TAG, "Response not successful: ${response.code}")
@@ -276,8 +300,8 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
                     return@launch
                 }
 
-                val inputStream = response.body?.byteStream()
-                if (inputStream != null) {
+                val inputStream = currentResponseBody?.byteStream()
+                if (inputStream != null && !isStoppingStream) {
                     Log.d(TAG, "Connected, parsing MJPEG stream")
                     wasEverConnected = true
                     isConnected = true
@@ -309,7 +333,7 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
             var isReadingHeader = true
             var isReadingJpeg = false
 
-            while (streamJob?.isActive == true && isConnected) {
+            while (streamJob?.isActive == true && isConnected && !isStoppingStream) {
                 bytesRead = withContext(Dispatchers.IO) { inputStream.read(buffer) }
 
                 if (bytesRead <= 0) {
@@ -352,6 +376,9 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
                             if (bitmap != null) {
                                 // Actualizar timestamp del último frame recibido
                                 lastFrameTime.set(System.currentTimeMillis())
+                                // Publicar frame de debug (escalado y con throttling)
+                                maybePublishPreview(bitmap)
+                                // Analizar con modelo
                                 processFrameForFaceDetection(bitmap)
                             }
 
@@ -366,6 +393,29 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         } catch (e: Exception) {
             Log.e(TAG, "Error parseando stream: ${e.message}")
             handleDisconnection(timeout = false)
+        } finally {
+            // Cerrar explícitamente
+            try { inputStream.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun maybePublishPreview(src: Bitmap) {
+        val now = System.currentTimeMillis()
+        val last = lastPreviewTime.get()
+        if (now - last < PREVIEW_MIN_INTERVAL_MS) return
+        if (!lastPreviewTime.compareAndSet(last, now)) return
+
+        val w = src.width
+        val h = src.height
+        val scale = minOf(PREVIEW_MAX_WIDTH.toFloat() / w, PREVIEW_MAX_HEIGHT.toFloat() / h, 1f)
+        val preview: Bitmap = if (scale < 1f) {
+            Bitmap.createScaledBitmap(src, (w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), true)
+        } else {
+            src
+        }
+        // Notificar listeners (en el hilo actual; el consumidor debe saltar al main thread)
+        frameListeners.forEach { listener ->
+            try { listener(preview) } catch (_: Exception) {}
         }
     }
 
@@ -395,6 +445,50 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         wasEverConnected = false
         lastFrameTime.set(0L)
         alarmPlayer?.stop()
+
+        // Nueva lógica para cerrar conexión HTTP
+        isStoppingStream = true
+        currentCall?.cancel()
+        try { currentResponseBody?.close() } catch (_: Exception) {}
+        currentCall = null
+        currentResponseBody = null
+    }
+
+    private fun sendDisconnectSignal() {
+        // Primero cerrar conexión física antes de notificar al host
+        isStoppingStream = true
+        currentCall?.cancel()
+        try { currentResponseBody?.close() } catch (_: Exception) {}
+        currentCall = null
+        currentResponseBody = null
+
+        val baseUrl = streamUrl.trim()
+        if (baseUrl.isEmpty()) return
+        // Derivar endpoint de desconexión: reemplaza /stream por /disconnect, si no existe añade /disconnect
+        val disconnectUrl = if (baseUrl.endsWith("/stream")) {
+            baseUrl.removeSuffix("/stream") + "/disconnect"
+        } else {
+            // evitar doble slash
+            (if (baseUrl.endsWith("/")) baseUrl.dropLast(1) else baseUrl) + "/disconnect"
+        }
+        Log.d(TAG, "Enviando señal de desconexión a: $disconnectUrl")
+        // Usar un cliente con timeout corto para no bloquear el stop
+        val quickClient = client.newBuilder()
+            .callTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .build()
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                updateNotification(STATE_SENDING_CLOSE)
+                val req = Request.Builder().url(disconnectUrl).get().build()
+                quickClient.newCall(req).execute().use { resp ->
+                    Log.d(TAG, "Respuesta desconexión: code=${resp.code}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Fallo enviando desconexión: ${e.message}")
+            }
+        }
     }
 
     fun addStateListener(listener: (String) -> Unit) {
@@ -404,6 +498,14 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
 
     fun removeStateListener(listener: (String) -> Unit) {
         stateListeners.remove(listener)
+    }
+
+    fun addFrameListener(listener: (Bitmap) -> Unit) {
+        frameListeners.add(listener)
+    }
+
+    fun removeFrameListener(listener: (Bitmap) -> Unit) {
+        frameListeners.remove(listener)
     }
 
     override fun onDestroy() {
@@ -421,6 +523,13 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         faceHelper = null
 
         serviceScope.cancel()
+
+        // Cierre final de conexión HTTP
+        isStoppingStream = true
+        currentCall?.cancel()
+        try { currentResponseBody?.close() } catch (_: Exception) {}
+        currentCall = null
+        currentResponseBody = null
     }
 
     // FaceLandmarkerHelper.LandmarkerListener implementation

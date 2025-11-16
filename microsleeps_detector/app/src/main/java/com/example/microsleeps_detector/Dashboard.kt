@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -29,6 +30,7 @@ class Dashboard : Fragment() {
     private var serviceBound = false
     private var service: DrowsinessDetectionService? = null
     private var stateListener: ((String) -> Unit)? = null
+    private var frameListener: ((Bitmap) -> Unit)? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -38,11 +40,22 @@ class Dashboard : Fragment() {
             // Subscribe to status updates
             stateListener = { state -> updateServiceStatus(state) }
             stateListener?.let { service?.addStateListener(it) }
+            // Subscribe to debug frames
+            frameListener = { bmp ->
+                // Ensure main thread update
+                view?.post {
+                    binding.debugFrame.setImageBitmap(bmp)
+                }
+            }
+            frameListener?.let { service?.addFrameListener(it) }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            // Unsubscribe listeners
             stateListener?.let { service?.removeStateListener(it) }
+            frameListener?.let { service?.removeFrameListener(it) }
             stateListener = null
+            frameListener = null
             service = null
             serviceBound = false
         }
@@ -101,6 +114,8 @@ class Dashboard : Fragment() {
         val intent = Intent(requireContext(), DrowsinessDetectionService::class.java).apply {
             action = DrowsinessDetectionService.ACTION_START
             putExtra(DrowsinessDetectionService.EXTRA_STREAM_URL, url)
+            // Optional: expose frame timeout tuning from UI later
+            // putExtra(DrowsinessDetectionService.EXTRA_FRAME_TIMEOUT_MS, 3000L)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             requireContext().startForegroundService(intent)
@@ -118,6 +133,8 @@ class Dashboard : Fragment() {
         requireContext().startService(intent)
         unbindFromService()
         updateServiceStatus("Estado del servicio: Inactivo")
+        // Clear debug frame
+        binding.debugFrame.setImageDrawable(null)
     }
 
     private fun bindToService() {
@@ -128,7 +145,9 @@ class Dashboard : Fragment() {
     private fun unbindFromService() {
         if (serviceBound) {
             stateListener?.let { service?.removeStateListener(it) }
+            frameListener?.let { service?.removeFrameListener(it) }
             stateListener = null
+            frameListener = null
             requireContext().unbindService(serviceConnection)
             serviceBound = false
         }

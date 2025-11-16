@@ -26,6 +26,8 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     // For visualization adjustments
     private val imageRotation = 90f
 
+    private var alarmPlayer: AlarmPlayer? = null
+
     private val streamUrl = "http://192.168.43.74/stream"
     //private val streamUrl = "http://10.253.50.3/stream"
     //private val streamUrl = "http://192.168.4.1/stream"
@@ -47,6 +49,10 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        alarmPlayer = AlarmPlayer(requireContext())
+        alarmPlayer?.initialize()
+
         renderer = LabelsRenderer(binding)
         Log.e(TAG, "Starting StreamFragment")
         startStream()
@@ -237,6 +243,10 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+
+        alarmPlayer?.release()
+        alarmPlayer = null
+
         renderer = null
         _binding = null
         streamJob?.cancel()
@@ -246,6 +256,13 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     override fun onAnalysis(result: FaceAnalysis.Result) {
         renderer?.render(result)
+
+        // Activar/desactivar alarma según ojos cerrados
+        if (result.eyesClosed) {
+            alarmPlayer?.play()
+        } else {
+            alarmPlayer?.stop()
+        }
     }
 
     override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {

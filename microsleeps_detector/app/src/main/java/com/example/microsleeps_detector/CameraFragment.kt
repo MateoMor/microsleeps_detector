@@ -13,20 +13,17 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.Fragment
 import com.example.microsleeps_detector.databinding.FragmentCameraBinding
-import com.example.microsleeps_detector.ui.LabelsRenderer
+import com.example.microsleeps_detector.ui.OverlayView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
+class CameraFragment : BaseFaceDetectionFragment<FragmentCameraBinding>() {
 
-    private var _binding: FragmentCameraBinding? = null
-    private val binding get() = _binding!!
+    override val binding get() = _binding!!
 
     private var cameraExecutor: ExecutorService? = null
     private var isFrontCamera = true
-    private var renderer: LabelsRenderer? = null
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -40,11 +37,16 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         return binding.root
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
+    override fun onViewCreatedImpl(view: View, savedInstanceState: Bundle?) {
         cameraExecutor = Executors.newSingleThreadExecutor()
-        renderer = LabelsRenderer(binding)
         ensurePermissionAndStart()
+    }
+
+    override fun getOverlayView(): OverlayView? = binding.overlay
+
+    override fun onDestroyViewImpl() {
+        cameraExecutor?.shutdown()
+        cameraExecutor = null
     }
 
     private fun ensurePermissionAndStart() {
@@ -89,53 +91,5 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                 Toast.makeText(requireContext(), "No se pudo iniciar la cámara: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(requireContext()))
-    }
-
-    override fun onResume() {
-        super.onResume()
-        (requireActivity() as MainActivity).setLandmarkerListener(this)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        (requireActivity() as MainActivity).setLandmarkerListener(null)
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        renderer = null
-        _binding = null
-        cameraExecutor?.shutdown()
-        cameraExecutor = null
-    }
-
-    // FaceLandmarkerHelper.LandmarkerListener
-
-    override fun onAnalysis(result: FaceAnalysis.Result) {
-        // Forward analysis to the labels renderer (handles main thread internally)
-        renderer?.render(result)
-    }
-
-    override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {
-        if (!isAdded) return
-        requireActivity().runOnUiThread {
-            binding.overlay.setResults(resultBundle)
-        }
-    }
-
-    override fun onEmpty() {
-        if (!isAdded) return
-        renderer?.setStatus("No face detected")
-        requireActivity().runOnUiThread {
-            binding.overlay.clear()
-        }
-    }
-
-    override fun onError(error: String, errorCode: Int) {
-        if (!isAdded) return
-        renderer?.setStatus("Error: $error")
-        requireActivity().runOnUiThread {
-            Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
-        }
     }
 }

@@ -5,28 +5,22 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
-import androidx.fragment.app.Fragment
 import com.example.microsleeps_detector.databinding.FragmentStreamBinding
-import com.example.microsleeps_detector.ui.LabelsRenderer
+import com.example.microsleeps_detector.ui.OverlayView
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.IOException
 import android.util.Log
 import java.util.concurrent.TimeUnit
 
 private val TAG = "StreamFragment"
 
-class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
+class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
-    private var _binding: FragmentStreamBinding? = null
-    private val binding get() = _binding!!
+    override val binding get() = _binding!!
 
     // For visualization adjustments
     private val imageRotation = 90f
-
-    private var alarmPlayer: AlarmPlayer? = null
 
     private val streamUrl = "http://192.168.43.74/stream"
     //private val streamUrl = "http://10.253.50.3/stream"
@@ -36,7 +30,6 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
     private var streamJob: Job? = null
-    private var renderer: LabelsRenderer? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -47,15 +40,19 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
         return binding.root
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
-        alarmPlayer = AlarmPlayer(requireContext())
-        alarmPlayer?.initialize()
-
-        renderer = LabelsRenderer(binding)
+    override fun onViewCreatedImpl(view: View, savedInstanceState: Bundle?) {
         Log.e(TAG, "Starting StreamFragment")
         startStream()
+    }
+
+    override fun getOverlayView(): OverlayView? = binding.overlay
+
+    override fun onPauseImpl() {
+        streamJob?.cancel()
+    }
+
+    override fun onDestroyViewImpl() {
+        streamJob?.cancel()
     }
 
     private fun startStream() {
@@ -227,64 +224,6 @@ class StreamFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
                     renderer?.setStatus("Stream error: ${e.message}")
                 }
             }
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        (requireActivity() as MainActivity).setLandmarkerListener(this)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        (requireActivity() as MainActivity).setLandmarkerListener(null)
-        streamJob?.cancel()
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-
-        alarmPlayer?.release()
-        alarmPlayer = null
-
-        renderer = null
-        _binding = null
-        streamJob?.cancel()
-    }
-
-    // FaceLandmarkerHelper.LandmarkerListener
-
-    override fun onAnalysis(result: FaceAnalysis.Result) {
-        renderer?.render(result)
-
-        // Activar/desactivar alarma según ojos cerrados
-        if (result.eyesClosed) {
-            alarmPlayer?.play()
-        } else {
-            alarmPlayer?.stop()
-        }
-    }
-
-    override fun onResults(resultBundle: FaceLandmarkerHelper.ResultBundle) {
-        if (!isAdded) return
-        requireActivity().runOnUiThread {
-            binding.overlay.setResults(resultBundle)
-        }
-    }
-
-    override fun onEmpty() {
-        if (!isAdded) return
-        renderer?.setStatus("No face detected")
-        requireActivity().runOnUiThread {
-            binding.overlay.clear()
-        }
-    }
-
-    override fun onError(error: String, errorCode: Int) {
-        if (!isAdded) return
-        renderer?.setStatus("Error: $error")
-        requireActivity().runOnUiThread {
-            Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
         }
     }
 }

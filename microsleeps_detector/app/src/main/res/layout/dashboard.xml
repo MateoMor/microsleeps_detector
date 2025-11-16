@@ -8,7 +8,7 @@
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:padding="16dp">
 
         <Button
@@ -25,10 +25,56 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/Stream"
+            android:text="@string/stream"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/button_first" />
+
+        <TextView
+            android:id="@+id/serviceStatusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Estado del servicio: Inactivo"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/button_stream" />
+
+        <EditText
+            android:id="@+id/streamUrlInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="URL del stream (ESP32-CAM)"
+            android:inputType="textUri"
+            android:text="http://192.168.43.74/stream"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/serviceStatusText" />
+
+        <Button
+            android:id="@+id/startServiceBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Iniciar servicio"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@+id/stopServiceBtn"
+            app:layout_constraintHorizontal_weight="1"
+            app:layout_constraintTop_toBottomOf="@id/streamUrlInput" />
+
+        <Button
+            android:id="@+id/stopServiceBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginStart="8dp"
+            android:text="Detener servicio"
+            app:layout_constraintStart_toEndOf="@id/startServiceBtn"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHorizontal_weight="1"
+            app:layout_constraintTop_toBottomOf="@id/streamUrlInput" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

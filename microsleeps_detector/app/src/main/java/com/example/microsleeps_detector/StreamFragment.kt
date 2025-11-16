@@ -30,6 +30,7 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
     private var streamJob: Job? = null
+    private var isConnected = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -41,6 +42,8 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
     }
 
     override fun onViewCreatedImpl(view: View, savedInstanceState: Bundle?) {
+        // Mostrar estado inicial explícito
+        renderer?.setStatus("No conectado")
         Log.e(TAG, "Starting StreamFragment")
         startStream()
     }
@@ -49,6 +52,8 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
     override fun onPauseImpl() {
         streamJob?.cancel()
+        isConnected = false
+        renderer?.setStatus("No conectado")
     }
 
     override fun onDestroyViewImpl() {
@@ -67,29 +72,36 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
                 if (!response.isSuccessful) {
                     Log.e(TAG, "Response not successful: ${response.code}")
+                    isConnected = false
                     withContext(Dispatchers.Main) {
-                        renderer?.setStatus("Error: ${response.code}")
+                        renderer?.setStatus("No conectado")
                     }
                     return@launch
                 }
 
                 val inputStream = response.body?.byteStream()
                 if (inputStream != null) {
+                    // Conectado
+                    isConnected = true
                     Log.d(TAG, "Connected, starting MJPEG parser")
                     withContext(Dispatchers.Main) {
-                        renderer?.setStatus("Connected to stream")
+                        renderer?.setStatus("Conectado")
                     }
                     parseMjpegStream(inputStream)
                 } else {
+                    // No conectado (sin datos)
+                    isConnected = false
                     Log.e(TAG, "Response body is null")
                     withContext(Dispatchers.Main) {
-                        renderer?.setStatus("Empty response body")
+                        renderer?.setStatus("No conectado")
                     }
                 }
             } catch (e: Exception) {
+                // Error durante conexión inicial
+                isConnected = false
                 Log.e(TAG, "Exception in startStream: ${e.message}", e)
                 withContext(Dispatchers.Main) {
-                    renderer?.setStatus("Error: ${e.message}")
+                    renderer?.setStatus("No conectado")
                 }
             }
         }
@@ -104,7 +116,7 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
                     return@withContext
                 }
 
-                // Convertir Bitmap a MPImage
+                // Convertir Bitmap a MPImage (sin rotación)
                 val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
 
                 // Detectar con timestamp actual
@@ -118,18 +130,11 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
     }
 
     /**
-     * Rota un Bitmap por los grados especificados.
-     * @param source Bitmap original
-     * @param degrees Grados de rotación (0, 90, 180, 270)
-     * @return Bitmap rotado
+     * Rota un Bitmap por los grados especificados solo para visualización.
      */
     private fun rotateBitmap(source: android.graphics.Bitmap, degrees: Float): android.graphics.Bitmap {
         if (degrees == 0f) return source
-
-        val matrix = android.graphics.Matrix().apply {
-            postRotate(degrees)
-        }
-
+        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
         return android.graphics.Bitmap.createBitmap(
             source, 0, 0, source.width, source.height, matrix, true
         )
@@ -145,12 +150,12 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
             var isReadingJpeg = false
 
             while (streamJob?.isActive == true) {
-                bytesRead = withContext(Dispatchers.IO) {
-                    inputStream.read(buffer)
-                }
-
+                bytesRead = withContext(Dispatchers.IO) { inputStream.read(buffer) }
                 if (bytesRead <= 0) {
                     Log.d(TAG, "Stream ended")
+                    // Se desconectó
+                    isConnected = false
+                    withContext(Dispatchers.Main) { renderer?.setStatus("Se desconectó") }
                     break
                 }
 
@@ -159,22 +164,17 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
                     frameBuffer.add(byte)
 
                     if (isReadingHeader) {
-                        // Convert buffer to string to search for Content-Length
                         if (frameBuffer.size > 50) {
                             val frameStr = try {
                                 String(frameBuffer.toByteArray(), Charsets.UTF_8)
-                            } catch (e: Exception) {
-                                ""
-                            }
+                            } catch (_: Exception) { "" }
 
                             val contentLengthMatch = Regex("Content-Length: (\\d+)").find(frameStr)
                             if (contentLengthMatch != null) {
                                 contentLength = contentLengthMatch.groupValues[1].toInt()
-                                Log.d(TAG, "Found Content-Length: $contentLength")
                             }
                         }
 
-                        // Detect end of headers (double CRLF: \r\n\r\n = 0x0D 0x0A 0x0D 0x0A)
                         if (frameBuffer.size >= 4 &&
                             frameBuffer[frameBuffer.size - 4].toInt() and 0xFF == 0x0D &&
                             frameBuffer[frameBuffer.size - 3].toInt() and 0xFF == 0x0A &&
@@ -184,27 +184,23 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
                             isReadingHeader = false
                             isReadingJpeg = true
                             frameBuffer.clear()
-                            Log.d(TAG, "Headers done, expecting $contentLength bytes of JPEG")
                         }
                     } else if (isReadingJpeg && contentLength > 0) {
-                        // We have enough bytes for a complete JPEG
                         if (frameBuffer.size >= contentLength) {
-                            Log.d(TAG, "Got complete JPEG frame ($contentLength bytes)")
                             val jpegData = frameBuffer.take(contentLength).toByteArray()
                             val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
 
                             if (bitmap != null) {
-                                Log.d(TAG, "Frame decoded (${bitmap.width}x${bitmap.height})")
-
-                                val rotatedBitmap = rotateBitmap(bitmap, imageRotation)
-
-                                processFrameForFaceDetection(rotatedBitmap)
-
+                                // 1) Detectar con bitmap original
+                                processFrameForFaceDetection(bitmap)
+                                // 2) Rotar SOLO para mostrar
+                                val displayBitmap = rotateBitmap(bitmap, imageRotation)
                                 withContext(Dispatchers.Main) {
                                     if (isAdded) {
-                                        binding.streamImageView.setImageBitmap(rotatedBitmap)
+                                        binding.streamImageView.setImageBitmap(displayBitmap)
                                     }
                                 }
+                                // No reciclar el bitmap asignado al ImageView
                             } else {
                                 Log.w(TAG, "Failed to decode bitmap")
                             }
@@ -219,11 +215,26 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Stream parser error: ${e.message}", e)
+            // Se desconectó por error
+            isConnected = false
             withContext(Dispatchers.Main) {
                 if (isAdded) {
-                    renderer?.setStatus("Stream error: ${e.message}")
+                    renderer?.setStatus("Se desconectó")
                 }
             }
         }
+    }
+
+    // Override to avoid 'No face detected' when not connected
+    override fun onEmpty() {
+        if (!isAdded) return
+        if (!isConnected) {
+            renderer?.setStatus("No conectado")
+            requireActivity().runOnUiThread { binding.overlay.clear() }
+            return
+        }
+        // Connected but no face detected
+        renderer?.setStatus("No face detected")
+        requireActivity().runOnUiThread { binding.overlay.clear() }
     }
 }

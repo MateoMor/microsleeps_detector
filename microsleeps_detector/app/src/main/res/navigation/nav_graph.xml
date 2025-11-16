@@ -27,7 +27,7 @@
     <fragment
         android:id="@+id/StreamFragment"
         android:name="com.example.microsleeps_detector.StreamFragment"
-        android:label="@string/Stream"
+        android:label="@string/stream"
         tools:layout="@layout/fragment_stream" />
 
 </navigation>

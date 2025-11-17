@@ -27,10 +27,10 @@
 #define LED_GPIO_NUM      2  // LED rojo integrado (algunos módulos)
 
 // =============================
-// Configuración del Access Point
+// Credenciales de red Wi-Fi EXISTENTE
 // =============================
 const char* ssid = "ESP32S3_CAM_AP";
-const char* password = "esp32s3cam";  // debe tener mínimo 8 caracteres
+const char* password = "esp32s3cam";
 
 // =============================
 // Servidor HTTP
@@ -38,11 +38,48 @@ const char* password = "esp32s3cam";  // debe tener mínimo 8 caracteres
 WebServer server(80);
 
 // Control de FPS
-const int targetFPS = 8;  // número de imágenes por segundo
+const int targetFPS = 8;
 unsigned long lastFrameTime = 0;
-unsigned long frameInterval = 1000 / targetFPS; // milisegundos entre frames
+unsigned long frameInterval = 1000 / targetFPS;
 
+// ========================================================
+//     🔄 SISTEMA DE RECONEXIÓN AUTOMÁTICA AL WIFI
+// ========================================================
+
+unsigned long lastReconnectAttempt = 0;
+
+// Conexión inicial (reintento infinito)
+void connectToWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  Serial.println("📶 Intentando conectar a WiFi...");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  Serial.println("\n✅ WiFi conectado");
+  Serial.print("🌐 IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+// Reconectar si se pierde la señal (no bloquea)
+void maintainWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  if (millis() - lastReconnectAttempt >= 2000) {
+    Serial.println("🔄 WiFi desconectado, intentando reconectar...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    lastReconnectAttempt = millis();
+  }
+}
+
+// =============================
 // Handler para el streaming MJPEG
+// =============================
 void handleStream() {
   WiFiClient client = server.client();
   camera_fb_t * fb = NULL;
@@ -51,39 +88,81 @@ void handleStream() {
   client.println("Content-Type: multipart/x-mixed-replace; boundary=frame");
   client.println();
 
-  while (true) {
-  unsigned long now = millis();
-  if (now - lastFrameTime >= frameInterval) {
-    lastFrameTime = now;
+  Serial.println("📲 Cliente conectado al stream");
 
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("❌ Error al capturar frame");
+  while (true) {
+
+    if (!client.connected()) {
+      Serial.println("❌ Cliente desconectado");
+      client.stop();
       break;
     }
 
-    client.printf("--frame\r\n");
-    client.printf("Content-Type: image/jpeg\r\n");
-    client.printf("Content-Length: %u\r\n\r\n", fb->len);
-    client.write(fb->buf, fb->len);
-    client.printf("\r\n");
+    unsigned long loopStart = millis();
 
-    esp_camera_fb_return(fb);
+    if (millis() - lastFrameTime >= frameInterval) {
+      lastFrameTime = millis();
+
+      unsigned long t0 = millis();
+
+      fb = esp_camera_fb_get();
+      unsigned long t1 = millis();
+
+      if (!fb) {
+        Serial.println("❌ Error al capturar frame");
+        client.stop();
+        break;
+      }
+
+      client.printf("--frame\r\n");
+      client.printf("Content-Type: image/jpeg\r\n");
+      client.printf("Content-Length: %u\r\n\r\n", fb->len);
+
+      unsigned long t2 = millis();
+
+      size_t sent = client.write(fb->buf, fb->len);
+
+      Serial.printf("Bytes enviados: %u\n", sent);
+
+      if (sent == 0 || sent < fb->len) {
+        Serial.println("❌ Error durante write() -> Cliente dejó de recibir datos");
+        esp_camera_fb_return(fb);
+        client.stop();
+        break;
+      }
+
+      client.print("\r\n");
+
+      unsigned long t3 = millis();
+
+      esp_camera_fb_return(fb);
+
+      unsigned long t4 = millis();
+
+      Serial.println("🕒 --- Tiempos de operación (ms) ---");
+      Serial.printf("  Captura:        %lu ms\n", t1 - t0);
+      Serial.printf("  HTTP headers:   %lu ms\n", t2 - t1);
+      Serial.printf("  Envío imagen:   %lu ms\n", t3 - t2);
+      Serial.printf("  Devolver frame: %lu ms\n", t4 - t3);
+      Serial.printf("  Ciclo total:    %lu ms\n", t4 - loopStart);
+      Serial.println("------------------------------\n");
+
+      yield();
+    }
   }
 
-  if (!client.connected()) break;
-}
-  Serial.println("📴 Cliente desconectado");
+  Serial.println("📴 Stream finalizado.");
 }
 
+// =============================
 // Inicializa el servidor HTTP
+// =============================
 void startCameraServer() {
   server.on("/", []() {
     server.send(200, "text/plain", "Servidor MJPEG activo. Accede a /stream para ver el video.");
   });
 
   server.on("/stream", HTTP_GET, handleStream);
-
   server.begin();
   Serial.println("📡 Servidor HTTP iniciado en /stream");
 }
@@ -96,7 +175,6 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println("\n🔧 Iniciando cámara...");
 
-  // --- Configuración del módulo de cámara ---
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -118,13 +196,12 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA;
+  config.frame_size = FRAMESIZE_QCIF;
   config.jpeg_quality = 10;
   config.fb_count = 2;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
 
-  // --- Inicializar cámara ---
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("❌ Error iniciando cámara: 0x%x\n", err);
@@ -133,30 +210,14 @@ void setup() {
 
   Serial.println("📸 Cámara inicializada correctamente");
 
-  // --- Crear punto de acceso ---
-  WiFi.mode(WIFI_AP);
-  bool result = WiFi.softAP(ssid, password);
-  if (!result) {
-    Serial.println("❌ Error iniciando Access Point");
-    return;
-  }
-
-  IPAddress IP = WiFi.softAPIP();
-  Serial.println("\n✅ Access Point creado!");
-  Serial.print("🔹 SSID: "); Serial.println(ssid);
-  Serial.print("🔹 PASS: "); Serial.println(password);
-  Serial.print("🌐 Conéctate y entra a: http://");
-  Serial.println(IP);
-  Serial.println("➡ Luego abre /stream para ver el video.");
-
-  // --- Iniciar servidor de la cámara ---
+  connectToWiFi();
   startCameraServer();
 
-  // Encender LED indicador
   pinMode(LED_GPIO_NUM, OUTPUT);
   digitalWrite(LED_GPIO_NUM, HIGH);
 }
 
 void loop() {
-  server.handleClient();  // necesario para atender solicitudes
+  maintainWiFi();      // 🔄 Reintenta conexión si se cae
+  server.handleClient();
 }

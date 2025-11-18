@@ -38,7 +38,7 @@ const char* password = "esp32s3cam";
 WebServer server(80);
 
 // Control de FPS
-const int targetFPS = 8;
+const int targetFPS = 6;
 unsigned long lastFrameTime = 0;
 unsigned long frameInterval = 1000 / targetFPS;
 
@@ -196,8 +196,8 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QCIF;
-  config.jpeg_quality = 10;
+  config.frame_size = FRAMESIZE_128X128;
+  config.jpeg_quality = 20;
   config.fb_count = 2;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;

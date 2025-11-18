@@ -76,6 +76,7 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
 
     private var currentState = STATE_NOT_CONNECTED
     private var streamUrl: String = "http://192.168.43.74/stream"
+    //private var streamUrl: String = "http://192.168.4.1/stream"
 
     // Track connection lifecycle
     private var wasEverConnected = false
@@ -236,10 +237,12 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
                     val lastFrame = lastFrameTime.get()
                     val now = System.currentTimeMillis()
                     val timeSinceLastFrame = now - lastFrame
-                    if (lastFrame != 0L && timeSinceLastFrame > frameTimeoutMs) {
-                        Log.w(TAG, "Timeout sin frames (${timeSinceLastFrame}ms > ${frameTimeoutMs}ms)")
-                        handleDisconnection(timeout = true)
-                    }
+                    // Verificación de timeout deshabilitada por solicitud
+                    // Antes:
+                    // if (lastFrame != 0L && timeSinceLastFrame > frameTimeoutMs) {
+                    //     Log.w(TAG, "Timeout sin frames (${timeSinceLastFrame}ms > ${frameTimeoutMs}ms)")
+                    //     handleDisconnection(timeout = true)
+                    // }
                 }
             }
         }

@@ -7,16 +7,26 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.CameraSelector
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import android.graphics.Bitmap
@@ -36,6 +46,10 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val EXTRA_STREAM_URL = "EXTRA_STREAM_URL"
+        // Nueva fuente seleccionable
+        const val EXTRA_SOURCE = "EXTRA_SOURCE"
+        const val SOURCE_STREAM = "stream"
+        const val SOURCE_PHONE_CAMERA = "phone_camera"
 
         const val STATE_NOT_CONNECTED = "No conectado"
         const val STATE_CONNECTING = "Conectando..."
@@ -108,11 +122,27 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
     private val emptyListeners = mutableListOf<() -> Unit>()
     private val errorListeners = mutableListOf<(String, Int) -> Unit>()
 
+    // Estado para cámara del teléfono
+    private var usingCameraSource = false
+    private var cameraExecutor: ExecutorService? = null
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var imageAnalysis: ImageAnalysis? = null
+    private var isFrontCamera: Boolean = true
+
+    // LifecycleOwner artificial para CameraX en el servicio: estado fijo RESUMED
+    private val cameraLifecycleOwner = object : LifecycleOwner {
+        private val registry = LifecycleRegistry(this).apply {
+            currentState = Lifecycle.State.RESUMED
+        }
+        override val lifecycle: Lifecycle
+            get() = registry
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): DrowsinessDetectionService = this@DrowsinessDetectionService
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder? = binder
 
     override fun onCreate() {
         super.onCreate()
@@ -138,21 +168,34 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
 
         when (intent?.action) {
             ACTION_START -> {
-                streamUrl = intent.getStringExtra(EXTRA_STREAM_URL) ?: streamUrl
-                frameTimeoutMs = intent.getLongExtra(EXTRA_FRAME_TIMEOUT_MS, FRAME_TIMEOUT_MS).coerceAtLeast(1000L)
+                val source = intent.getStringExtra(EXTRA_SOURCE) ?: SOURCE_STREAM
+                usingCameraSource = source == SOURCE_PHONE_CAMERA
+
+                if (!usingCameraSource) {
+                    streamUrl = intent.getStringExtra(EXTRA_STREAM_URL) ?: streamUrl
+                    frameTimeoutMs = intent.getLongExtra(EXTRA_FRAME_TIMEOUT_MS, FRAME_TIMEOUT_MS).coerceAtLeast(1000L)
+                }
+
                 shouldReconnect = true
                 reconnectAttempts = 0
                 startForegroundService()
-                startStreamDetection()
-                startWatchdog()
+
+                if (usingCameraSource) {
+                    stopStreamDetection()
+                    startCameraDetection()
+                } else {
+                    stopCameraDetection()
+                    startStreamDetection()
+                    startWatchdog()
+                }
             }
             ACTION_STOP -> {
                 // Enviar señal de cierre antes de parar si había conexión
-                if (wasEverConnected || isConnected) {
+                if ((wasEverConnected || isConnected) && !usingCameraSource) {
                     sendDisconnectSignal()
                 }
                 shouldReconnect = false
-                stopStreamDetection()
+                if (usingCameraSource) stopCameraDetection() else stopStreamDetection()
                 stopWatchdog()
                 stopSelf()
             }
@@ -498,6 +541,70 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
                 Log.w(TAG, "Fallo enviando desconexión: ${e.message}")
             }
         }
+    }
+
+    private fun startCameraDetection() {
+        stopCameraDetection()
+
+        updateNotification(STATE_CONNECTING)
+
+        val camGranted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (!camGranted) {
+            updateNotification("$STATE_ERROR: Permiso de cámara no concedido")
+            return
+        }
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                cameraProvider = providerFuture.get()
+
+                val analysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                    .build()
+
+                analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
+                    val helper = faceHelper
+                    if (helper == null || helper.isClose()) {
+                        imageProxy.close()
+                        return@setAnalyzer
+                    }
+                    helper.detectLiveStream(imageProxy, isFrontCamera)
+                }
+
+                val selector = CameraSelector.Builder()
+                    .requireLensFacing(if (isFrontCamera) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
+                    .build()
+
+                cameraProvider?.unbindAll()
+                // El LifecycleOwner ya está en RESUMED, no es necesario cambiar estados
+                cameraProvider?.bindToLifecycle(cameraLifecycleOwner, selector, analysis)
+
+                imageAnalysis = analysis
+                isConnected = true
+                wasEverConnected = true
+                updateNotification(STATE_RUNNING)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "No se pudo iniciar la cámara: ${e.message}", e)
+                updateNotification("$STATE_ERROR: ${e.message}")
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun stopCameraDetection() {
+        try { cameraProvider?.unbindAll() } catch (_: Exception) {}
+        imageAnalysis = null
+        cameraProvider = null
+        cameraExecutor?.shutdown()
+        cameraExecutor = null
+        // No cambiamos estado del LifecycleOwner
+        isConnected = false
+        wasEverConnected = false
+        alarmPlayer?.stop()
     }
 
     fun addStateListener(listener: (String) -> Unit) {

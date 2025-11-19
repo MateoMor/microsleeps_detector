@@ -41,6 +41,41 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/button_stream" />
 
+        <!-- Selector de fuente -->
+        <TextView
+            android:id="@+id/sourceSelectorLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Fuente de cámara en segundo plano"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/serviceStatusText" />
+
+        <RadioGroup
+            android:id="@+id/sourceRadioGroup"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/sourceSelectorLabel">
+
+            <RadioButton
+                android:id="@+id/radioSourceStream"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Stream ESP32" />
+
+            <RadioButton
+                android:id="@+id/radioSourcePhone"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="Cámara del celular" />
+        </RadioGroup>
+
         <EditText
             android:id="@+id/streamUrlInput"
             android:layout_width="0dp"
@@ -51,7 +86,7 @@
             android:text="http://192.168.43.74/stream"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/serviceStatusText" />
+            app:layout_constraintTop_toBottomOf="@id/sourceRadioGroup" />
 
         <Button
             android:id="@+id/startServiceBtn"

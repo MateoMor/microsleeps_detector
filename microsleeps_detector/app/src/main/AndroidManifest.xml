@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <!-- Optional, required on Android 13+ to show notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
+    <!-- Foreground camera service permission for newer targets -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" tools:targetApi="34" />
     <uses-feature android:name="android.hardware.camera.any"/>
 
     <application
@@ -33,7 +35,7 @@
         <service
             android:name=".DrowsinessDetectionService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="camera|dataSync" />
 
     </application>
 

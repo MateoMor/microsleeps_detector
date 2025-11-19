@@ -60,6 +60,9 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
     implementation("androidx.camera:camera-video:$cameraxVersion")
 
+    // Lifecycle Service to bind CameraX to service lifecycle
+    implementation("androidx.lifecycle:lifecycle-service:2.8.6")
+
     // MediaPipe Tasks Vision (Face Landmarker)
     implementation("com.google.mediapipe:tasks-vision:0.10.18")
 

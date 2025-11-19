@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.IBinder
 import android.view.*
@@ -21,7 +20,6 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
     // Listeners para suscribir/desuscribir limpiamente
     private var stateListener: ((String) -> Unit)? = null
-    private var frameListener: ((Bitmap) -> Unit)? = null
     private var resultListener: ((FaceLandmarkerHelper.ResultBundle) -> Unit)? = null
     private var analysisListener: ((FaceAnalysis.Result) -> Unit)? = null
     private var emptyListener: (() -> Unit)? = null
@@ -51,17 +49,6 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
                 }
             }
             stateListener?.let { service?.addStateListener(it) }
-
-            // Frame de vista previa -> mostrar en ImageView
-            frameListener = { bmp ->
-                // Post to ImageView to ensure main thread without needing early return labels
-                binding.streamImageView.post {
-                    if (isAdded) {
-                        binding.streamImageView.setImageBitmap(bmp)
-                    }
-                }
-            }
-            frameListener?.let { service?.addFrameListener(it) }
 
             // Resultados y análisis -> overlay y labels
             resultListener = { bundle ->
@@ -163,13 +150,11 @@ class StreamFragment : BaseFaceDetectionFragment<FragmentStreamBinding>() {
 
     private fun unsubscribeAll() {
         stateListener?.let { service?.removeStateListener(it) }
-        frameListener?.let { service?.removeFrameListener(it) }
         resultListener?.let { service?.removeResultListener(it) }
         analysisListener?.let { service?.removeAnalysisListener(it) }
         emptyListener?.let { service?.removeEmptyListener(it) }
         errorListener?.let { service?.removeErrorListener(it) }
         stateListener = null
-        frameListener = null
         resultListener = null
         analysisListener = null
         emptyListener = null

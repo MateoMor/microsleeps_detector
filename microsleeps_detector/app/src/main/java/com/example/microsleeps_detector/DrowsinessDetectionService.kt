@@ -89,7 +89,8 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
         .build()
 
     private var currentState = STATE_NOT_CONNECTED
-    private var streamUrl: String = "http://192.168.43.74/stream"
+    //private var streamUrl: String = "http://192.168.43.74/stream"
+    private var streamUrl: String = "http://192.168.53.74/stream"
     //private var streamUrl: String = "http://192.168.4.1/stream"
 
     // Track connection lifecycle
@@ -300,7 +301,8 @@ class DrowsinessDetectionService : Service(), FaceLandmarkerHelper.LandmarkerLis
      * Maneja la desconexión: actualiza estado e intenta reconectar si está habilitado.
      */
     private fun handleDisconnection(timeout: Boolean = false) {
-        if (!isConnected && currentState.startsWith("Se desconectó")) return // evitar repetir
+        // Previously avoided repeating disconnection handling; commented out to let callers always run.
+        // if (!isConnected && currentState.startsWith("Se desconectó")) return // evitar repetir
         isConnected = false
         wasEverConnected = true
         streamJob?.cancel()

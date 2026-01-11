@@ -47,4 +47,9 @@
     </string>
     <!-- TODO: Remove or change this placeholder text -->
     <string name="hello_blank_fragment">Hello blank fragment</string>
+
+    <!-- Service status strings used by Dashboard -->
+    <string name="service_status">Estado del servicio: %1$s</string>
+    <string name="service_status_starting">Iniciando…</string>
+    <string name="service_status_inactive">Inactivo</string>
 </resources>

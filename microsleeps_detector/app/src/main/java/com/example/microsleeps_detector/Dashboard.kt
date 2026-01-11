@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -15,6 +14,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.core.content.ContextCompat
 import androidx.navigation.fragment.findNavController
 import com.example.microsleeps_detector.databinding.DashboardBinding
@@ -30,10 +30,27 @@ class Dashboard : Fragment() {
     private var serviceBound = false
     private var service: DrowsinessDetectionService? = null
     private var stateListener: ((String) -> Unit)? = null
-    private var frameListener: ((Bitmap) -> Unit)? = null
 
     private val REQ_NOTIF = 1001
     private val REQ_CAMERA = 1002
+
+    // Activity Result launchers for modern permission handling
+    private val cameraPermissionLauncher = registerForActivityResult(RequestPermission()) { granted ->
+        if (granted) {
+            // After camera granted, proceed to notification check/start
+            checkNotificationAndStart()
+        } else {
+            Toast.makeText(requireContext(), "Permiso de cámara denegado", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(RequestPermission()) { granted ->
+        if (granted) {
+            startBackgroundService()
+        } else {
+            Toast.makeText(requireContext(), "Permiso de notificaciones denegado", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -43,22 +60,12 @@ class Dashboard : Fragment() {
             // Subscribe to status updates
             stateListener = { state -> updateServiceStatus(state) }
             stateListener?.let { service?.addStateListener(it) }
-            // Subscribe to debug frames
-            frameListener = { bmp ->
-                // Ensure main thread update
-                view?.post {
-                    binding.debugFrame.setImageBitmap(bmp)
-                }
-            }
-            frameListener?.let { service?.addFrameListener(it) }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             // Unsubscribe listeners
             stateListener?.let { service?.removeStateListener(it) }
-            frameListener?.let { service?.removeFrameListener(it) }
             stateListener = null
-            frameListener = null
             service = null
             serviceBound = false
         }
@@ -102,19 +109,23 @@ class Dashboard : Fragment() {
         binding.sourceRadioGroup.checkedRadioButtonId == R.id.radioSourcePhone
 
     private fun ensurePermissionsAndStart() {
-        // If phone camera selected, ensure CAMERA permission first
+        // If phone camera selected, ensure CAMERA permission first via the launcher
         if (isPhoneSourceSelected()) {
             val camGranted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
             if (!camGranted) {
-                requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAMERA)
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                 return
             }
         }
-        // Ensure notification permission on Android 13+
+        // If not phone or camera already granted, check notifications permission next
+        checkNotificationAndStart()
+    }
+
+    private fun checkNotificationAndStart() {
         if (Build.VERSION.SDK_INT >= 33) {
             val notifGranted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
             if (!notifGranted) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 return
             }
         }
@@ -141,7 +152,7 @@ class Dashboard : Fragment() {
             requireContext().startService(intent)
         }
         bindToService()
-        updateServiceStatus("Iniciando…")
+        updateServiceStatus(getString(R.string.service_status_starting))
     }
 
     private fun stopBackgroundService() {
@@ -150,9 +161,7 @@ class Dashboard : Fragment() {
         }
         requireContext().startService(intent)
         unbindFromService()
-        updateServiceStatus("Estado del servicio: Inactivo")
-        // Clear debug frame
-        binding.debugFrame.setImageDrawable(null)
+        updateServiceStatus(getString(R.string.service_status_inactive))
     }
 
     private fun bindToService() {
@@ -163,37 +172,15 @@ class Dashboard : Fragment() {
     private fun unbindFromService() {
         if (serviceBound) {
             stateListener?.let { service?.removeStateListener(it) }
-            frameListener?.let { service?.removeFrameListener(it) }
             stateListener = null
-            frameListener = null
             requireContext().unbindService(serviceConnection)
             serviceBound = false
         }
     }
 
     private fun updateServiceStatus(state: String) {
-        binding.serviceStatusText.text = "Estado del servicio: $state"
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        when (requestCode) {
-            REQ_NOTIF -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    startBackgroundService()
-                } else {
-                    Toast.makeText(requireContext(), "Permiso de notificaciones denegado", Toast.LENGTH_SHORT).show()
-                }
-            }
-            REQ_CAMERA -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    // After camera granted, continue with notification check/start
-                    ensurePermissionsAndStart()
-                } else {
-                    Toast.makeText(requireContext(), "Permiso de cámara denegado", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        // Use string resource with placeholder to avoid lint warning
+        binding.serviceStatusText.text = getString(R.string.service_status, state)
     }
 
     override fun onDestroyView() {

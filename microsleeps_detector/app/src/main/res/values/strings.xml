@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">microsleeps_detector</string>
+    <string name="app_name">Microsleeps Detector</string>
     <string name="action_settings">Settings</string>
     <!-- Strings used for fragments for navigation -->
     <string name="dashboard">Dashboard</string>
@@ -45,11 +45,39 @@
         libero vel nunc consequat, quis tincidunt nisl eleifend. Cras bibendum enim a justo luctus
         vestibulum. Fusce dictum libero quis erat maximus, vitae volutpat diam dignissim.
     </string>
+
     <!-- TODO: Remove or change this placeholder text -->
     <string name="hello_blank_fragment">Hello blank fragment</string>
 
     <!-- Service status strings used by Dashboard -->
-    <string name="service_status">Estado del servicio: %1$s</string>
-    <string name="service_status_starting">Iniciando…</string>
-    <string name="service_status_inactive">Inactivo</string>
+    <string name="service_status">Service status: %1$s</string>
+    <string name="service_status_default">Service status: Inactive</string>
+    <string name="service_status_starting">Starting…</string>
+    <string name="service_status_inactive">Inactive</string>
+
+    <!-- Common strings -->
+    <string name="start_service">Start Service</string>
+    <string name="stop_service">Stop Service</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="camera_source">Background camera source</string>
+    <string name="phone_camera">Phone Camera</string>
+    <string name="stream_camera">ESP32 Stream</string>
+    <string name="stream_url_hint">Stream URL (ESP32-CAM)</string>
+    <string name="detection_active">Detection Active</string>
+    <string name="detection_inactive">Detection Inactive</string>
+    <string name="ear_value">EAR: %1$.2f</string>
+    <string name="ear_default">EAR: 0.00</string>
+    <string name="nods_value">Nods: %1$d</string>
+    <string name="nods_default">Nods: 0</string>
+    <string name="detecting">Detecting...</string>
+    <string name="connecting_to_stream">Connecting to stream...</string>
+    <string name="drowsiness_detected">Drowsiness Detected!</string>
+    <string name="alert">Alert</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="error">Error</string>
+    <string name="connection_error">Connection Error</string>
+    <string name="permission_required">Permission Required</string>
+    <string name="camera_permission_denied">Camera permission denied</string>
 </resources>

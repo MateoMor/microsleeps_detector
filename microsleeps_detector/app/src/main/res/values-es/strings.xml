@@ -1,0 +1,45 @@
+<resources>
+    <string name="app_name">Detector de Microsueños</string>
+    <string name="action_settings">Configuración</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="dashboard">Panel</string>
+    <string name="second_fragment_label">Segundo Fragmento</string>
+    <string name="camera_button">Cámara</string>
+    <string name="previous">Anterior</string>
+    <string name="stream">Transmisión</string>
+
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hola fragmento en blanco</string>
+
+    <!-- Service status strings used by Dashboard -->
+    <string name="service_status">Estado del servicio: %1$s</string>
+    <string name="service_status_default">Estado del servicio: Inactivo</string>
+    <string name="service_status_starting">Iniciando…</string>
+    <string name="service_status_inactive">Inactivo</string>
+
+    <!-- Common strings -->
+    <string name="start_service">Iniciar Servicio</string>
+    <string name="stop_service">Detener Servicio</string>
+    <string name="connect">Conectar</string>
+    <string name="disconnect">Desconectar</string>
+    <string name="camera_source">Fuente de cámara en segundo plano</string>
+    <string name="phone_camera">Cámara del celular</string>
+    <string name="stream_camera">Stream ESP32</string>
+    <string name="stream_url_hint">URL del stream (ESP32-CAM)</string>
+    <string name="detection_active">Detección Activa</string>
+    <string name="detection_inactive">Detección Inactiva</string>
+    <string name="ear_value">EAR: %1$.2f</string>
+    <string name="ear_default">EAR: 0.00</string>
+    <string name="nods_value">Nods: %1$d</string>
+    <string name="nods_default">Nods: 0</string>
+    <string name="detecting">Detectando...</string>
+    <string name="connecting_to_stream">Conectando al stream...</string>
+    <string name="drowsiness_detected">¡Somnolencia Detectada!</string>
+    <string name="alert">Alerta</string>
+    <string name="ok">Aceptar</string>
+    <string name="cancel">Cancelar</string>
+    <string name="error">Error</string>
+    <string name="connection_error">Error de Conexión</string>
+    <string name="permission_required">Permiso Requerido</string>
+    <string name="camera_permission_denied">Permiso de cámara denegado</string>
+</resources>

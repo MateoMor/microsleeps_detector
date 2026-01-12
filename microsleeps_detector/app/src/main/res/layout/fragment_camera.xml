@@ -34,7 +34,7 @@
             android:id="@+id/labelPrimary"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="EAR: 0.00"
+            android:text="@string/ear_default"
             android:textColor="@android:color/white"
             android:textStyle="bold"
             android:textSize="14sp" />
@@ -43,7 +43,7 @@
             android:id="@+id/labelSecondary"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Nods: 0"
+            android:text="@string/nods_default"
             android:textColor="@android:color/white"
             android:textSize="13sp" />
     </LinearLayout>
@@ -58,7 +58,7 @@
         android:paddingHorizontal="12dp"
         android:paddingVertical="6dp"
         android:background="#66000000"
-        android:text="Detecting..."
+        android:text="@string/detecting"
         android:textColor="@android:color/white"
         android:textSize="13sp"
         android:clickable="false"

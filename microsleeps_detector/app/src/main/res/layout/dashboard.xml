@@ -35,7 +35,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="Estado del servicio: Inactivo"
+            android:text="@string/service_status_default"
             android:textStyle="bold"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
@@ -47,7 +47,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Fuente de cámara en segundo plano"
+            android:text="@string/camera_source"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/serviceStatusText" />
 
@@ -66,14 +66,14 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
-                android:text="Stream ESP32" />
+                android:text="@string/stream_camera" />
 
             <RadioButton
                 android:id="@+id/radioSourcePhone"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="16dp"
-                android:text="Cámara del celular" />
+                android:text="@string/phone_camera" />
         </RadioGroup>
 
         <EditText
@@ -81,7 +81,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="URL del stream (ESP32-CAM)"
+            android:hint="@string/stream_url_hint"
             android:inputType="textUri"
             android:text="http://192.168.43.74/stream"
             app:layout_constraintStart_toStartOf="parent"
@@ -93,7 +93,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Iniciar servicio"
+            android:text="@string/start_service"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toStartOf="@+id/stopServiceBtn"
             app:layout_constraintHorizontal_weight="1"
@@ -105,7 +105,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:layout_marginStart="8dp"
-            android:text="Detener servicio"
+            android:text="@string/stop_service"
             app:layout_constraintStart_toEndOf="@id/startServiceBtn"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintHorizontal_weight="1"
